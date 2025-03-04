@@ -213,6 +213,7 @@ async function processRequest(req: Request) {
         return buffer; // 返回截图
     });
 
+    
     // 检查缓存大小，确保不会超过限制
     const currentCacheSize = cache.size;
     if (currentCacheSize + result.length <= cache.maxSize) {
