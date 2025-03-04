@@ -1,8 +1,9 @@
-const express = require('express'); // 引入 Express 框架
-const {Cluster} = require('puppeteer-cluster'); // 引入 Puppeteer Cluster 库，用于并发浏览器任务
-const MarkdownIt = require('markdown-it'); // 引入 Markdown-It 库，用于解析 Markdown 语法
+import express from 'express'; // 引入 Express 框架
+import { Cluster } from 'puppeteer-cluster'; // 引入 Puppeteer Cluster 库，用于并发浏览器任务
+import MarkdownIt from 'markdown-it'; // 引入 Markdown-It 库，用于解析 Markdown 语法
+import { LRUCache } from 'lru-cache'; // 引入 LRU 缓存库，并注意其导入方式
+import { Request, Response } from 'express';
 const md = new MarkdownIt({breaks: false}); // 初始化 Markdown-It，并设置换行符解析选项
-const {LRUCache} = require('lru-cache'); // 引入 LRU 缓存库，并注意其导入方式
 const port = 3003; // 设置服务器监听端口
 const url = 'https://fireflycard.shushiai.com/'; // 要访问的目标 URL
 // const url = 'http://localhost:3000/'; // 要访问的目标 URL
@@ -59,7 +60,7 @@ function generateCacheKey(body) {
 }
 
 // 处理请求的主要逻辑
-async function processRequest(req) {
+async function processRequest(req: Request) {
     const body = req.body; // 获取请求体
     const cacheKey = generateCacheKey(body); // 生成缓存键
 
@@ -87,69 +88,89 @@ async function processRequest(req) {
     }
 
     const result = await cluster.execute({
-        url: url + '?' + params.toString(), // 拼接 URL 和查询参数
+        url: url + '?' + params.toString(),
         body,
         iconSrc,
     }, async ({page, data}) => {
         const {url, body, iconSrc} = data;
-        await page.setRequestInterception(true); // 设置请求拦截
+        await page.setRequestInterception(true);
         page.on('request', req => {
             if (!useLoadingFont && req.resourceType() === 'font') {
-                req.abort(); // 拦截字体请求
+                req.abort();
             } else {
-                req.continue(); // 继续其他请求
+                req.continue();
             }
         });
 
-        const viewPortConfig = {width: 1920, height: 1080+200}; // 设置视口配置
-        await page.setViewport(viewPortConfig); // 应用视口配置
+        const viewPortConfig = {width: 1920, height: 1080+200};
+        await page.setViewport(viewPortConfig);
         console.log('视口设置为:', viewPortConfig);
 
         await page.goto(url, {
-            timeout: 60000, // 设置导航超时
-            waitUntil: ['load', 'networkidle2'] // 等待页面加载完成
+            timeout: 60000,
+            waitUntil: ['load', 'networkidle2']
         });
         console.log('页面已导航至:', url);
 
-        // 等待字体加载完成
         if (useLoadingFont) {
             await page.waitForFunction('document.fonts.status === "loaded"');
         }
 
-        // 这里因为字体是按需加载，所以前面的等待字体加载不太有效，这里增大等待时间，以免部分字体没有加载完成
-        await delay(3000)
+        await delay(3000);
 
-        // const cardElement = await page.$(`#${body.temp || 'tempA'}`); // 查找卡片元素
-        const cardElement = await page.$(`.${body.temp || 'tempA'}`);
+        // 更新卡片元素选择器
+        const cardElement = await page.$(`.${body.temp || 'tempB'}`);
         if (!cardElement) {
-            throw new Error('请求的卡片不存在'); // 抛出错误
+            throw new Error('请求的卡片不存在');
         }
         console.log('找到卡片元素');
 
         let translate = body.translate;
         if (translate) {
-            await page.evaluate((translate: string) => {
-                // 如果有英文翻译插入英文翻译
+            await page.evaluate((translate) => {
                 const translateEl = document.querySelector('[name="showTranslation"]');
                 if (translateEl) translateEl.innerHTML = translate;
             }, translate);
         }
 
         let content = body.content;
-        let isContentHtml:boolean = body.isContentHtml;
+        let isContentHtml = body.isContentHtml;
         if (content) {
             let html = content;
-             if (!isContentHtml) {
-                 content = content.replace(/\n\n/g, '--br----br--');
+            if (!isContentHtml) {
+                content = content.replace(/\n\n/g, '--br----br--');
                 html = md.render(content);
                 html = html.replace(/--br--/g, '<br/>').replace(/\t/g, '&nbsp;&nbsp;&nbsp;&nbsp;');
             }
             await page.evaluate(html => {
-                // 插入内容
-                const contentEl = document.querySelector('[name="showContent"]');
+                const contentEl = document.querySelector('.md-class.editable-element');
                 if (contentEl) contentEl.innerHTML = html;
             }, html);
             console.log('卡片内容已设置');
+        }
+
+        // 设置标题
+        if (body.title) {
+            await page.evaluate((title) => {
+                const titleEl = document.querySelector('[data-split="showTitle"] .editable-element-new');
+                if (titleEl) titleEl.innerHTML = title;
+            }, body.title);
+        }
+
+        // 设置日期
+        if (body.date) {
+            await page.evaluate((date) => {
+                const dateEl = document.querySelector('[data-split="showDate"] .editable-element-new');
+                if (dateEl) dateEl.innerHTML = date;
+            }, body.date);
+        }
+
+        // 设置作者
+        if (body.author) {
+            await page.evaluate((author) => {
+                const authorEl = document.querySelector('[data-split="showAuthor"] .editable-element-new');
+                if (authorEl) authorEl.innerHTML = author;
+            }, body.author);
         }
 
         if (iconSrc && iconSrc.startsWith('http')) {
@@ -205,21 +226,21 @@ async function processRequest(req) {
 }
 
 // 处理保存图片的 POST 请求
-app.post('/saveImg', async (req, res) => {
+app.post('/saveImg', async (req: Request, res: Response) => {
     let attempts = 0;
     while (attempts < maxRetries) {
         try {
-            const buffer = await processRequest(req); // 处理请求
-            res.setHeader('Content-Type', 'image/png'); // 设置响应头
-            res.status(200).send(buffer); // 发送响应
+            const buffer = await processRequest(req);
+            res.setHeader('Content-Type', 'image/png');
+            res.status(200).send(buffer);
             return;
         } catch (error) {
             console.error(`第 ${attempts + 1} 次尝试失败:`, error);
             attempts++;
             if (attempts >= maxRetries) {
-                res.status(500).send(`处理请求失败，已重试 ${maxRetries} 次`); // 发送错误响应
+                res.status(500).send(`处理请求失败，已重试 ${maxRetries} 次`);
             } else {
-                await delay(1000); // 等待一秒后重试
+                await delay(1000);
             }
         }
     }
@@ -227,9 +248,11 @@ app.post('/saveImg', async (req, res) => {
 
 // 处理进程终止信号
 process.on('SIGINT', async () => {
-    await cluster.idle(); // 等待所有任务完成
-    await cluster.close(); // 关闭 Puppeteer 集群
-    process.exit(); // 退出进程
+    if (cluster) {
+        await cluster.idle();
+        await cluster.close();
+    }
+    process.exit();
 });
 
 // 启动服务器并初始化 Puppeteer 集群
