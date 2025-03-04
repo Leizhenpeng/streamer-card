@@ -17,11 +17,11 @@ app.use(express.urlencoded({extended: false})); // 使用 URL 编码中间件
 let cluster; // 定义 Puppeteer 集群变量
 
 // 设置 LRU 缓存，最大缓存项数和最大内存限制
-const cache = new LRUCache({
+const cache = new LRUCache<string, Buffer>({
     max: 100, // 缓存最大项数，可以根据需要调整
     maxSize: 50 * 1024 * 1024, // 最大缓存大小 50MB
-    sizeCalculation: (value, key) => {
-        return value.length; // 缓存项大小计算方法
+    sizeCalculation: (value: Buffer) => {
+        return value.byteLength; // 使用Buffer的byteLength属性计算大小
     },
     ttl: 600 * 1000, // 缓存项 10 分钟后过期
     allowStale: false, // 不允许使用过期的缓存项
